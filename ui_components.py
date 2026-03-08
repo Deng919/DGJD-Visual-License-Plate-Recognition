@@ -25,7 +25,7 @@ class QuietStream:
 class LicensePlateRecognitionGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("车牌识别计时收费控制系统（全自动版）")
+        self.root.title("车牌识别计时收费控制系统（带画面增强）")
         self.root.geometry("1400x900")
         self.root.resizable(True, True)
 
@@ -37,12 +37,44 @@ class LicensePlateRecognitionGUI:
         self.camera_thread = None
         self.cap = None
 
+        # 镜像模式变量
+        self.mirror_mode = tk.BooleanVar(value=True)  # 镜像变量
+        self.mirror_lock = threading.Lock()  # 镜像线程安全锁
+
+        # 画面增强变量（从配置文件读取默认值）
+        self.enhance_mode = tk.BooleanVar(value=ENABLE_SHARPEN)
+        self.sharpen_amount = tk.DoubleVar(value=SHARPEN_AMOUNT)
+        self.saturation_factor = tk.DoubleVar(value=SATURATION_FACTOR)
+        self.contrast_factor = tk.DoubleVar(value=CONTRAST_FACTOR)
+        self.brightness_factor = tk.DoubleVar(value=BRIGHTNESS_FACTOR)
+
         # 配置变量
         self.config = {
+            "camera_type": CAMERA_TYPE,
             "camera_index": CAMERA_INDEX,
+            "esp32cam_url": ESP32CAM_URL,
             "serial_port": SERIAL_PORT,
             "baud_rate": BAUD_RATE,
-            "plate_whitelist": DEFAULT_WHITELIST.copy()
+            "plate_whitelist": DEFAULT_WHITELIST.copy(),
+            # 新增：画质配置
+            "usb_resolution": USB_CAM_RESOLUTION,
+            "usb_fps": USB_CAM_FPS,
+            "esp32cam_fps": ESP32CAM_FPS,
+            "esp32cam_buffer": ESP32CAM_BUFFER_SIZE
+        }
+
+        # 预设分辨率选项
+        self.resolution_options = [
+            "1920x1080 (高清)",
+            "1280x720 (超清)",
+            "800x600 (标清)",
+            "640x480 (基础)"
+        ]
+        self.resolution_mapping = {
+            "1920x1080 (高清)": (1920, 1080),
+            "1280x720 (超清)": (1280, 720),
+            "800x600 (标清)": (800, 600),
+            "640x480 (基础)": (640, 480)
         }
 
         # 计时收费相关
@@ -95,34 +127,75 @@ class LicensePlateRecognitionGUI:
         config_frame = ttk.LabelFrame(parent, text="参数配置", padding="10")
         config_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
 
-        # 摄像头索引
-        ttk.Label(config_frame, text="摄像头索引:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
+        # 摄像头类型
+        ttk.Label(config_frame, text="摄像头类型:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
+        self.camera_type_var = tk.StringVar(value=self.config["camera_type"])
+        camera_type_combo = ttk.Combobox(config_frame, textvariable=self.camera_type_var, 
+                                        values=["USB", "ESP32CAM"], state="readonly", width=10)
+        camera_type_combo.grid(row=0, column=1, padx=5, pady=3)
+        camera_type_combo.bind("<<ComboboxSelected>>", self.on_camera_type_change)
+
+        # 摄像头索引（USB）
+        ttk.Label(config_frame, text="摄像头索引:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
         self.camera_index_var = tk.StringVar(value=str(self.config["camera_index"]))
-        ttk.Entry(config_frame, textvariable=self.camera_index_var, width=10).grid(row=0, column=1, padx=5, pady=3)
+        self.camera_index_entry = ttk.Entry(config_frame, textvariable=self.camera_index_var, width=10)
+        self.camera_index_entry.grid(row=1, column=1, padx=5, pady=3)
+
+        # ESP32CAM URL
+        ttk.Label(config_frame, text="ESP32CAM URL:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=3)
+        self.esp32cam_url_var = tk.StringVar(value=self.config["esp32cam_url"])
+        self.esp32cam_url_entry = ttk.Entry(config_frame, textvariable=self.esp32cam_url_var, width=30)
+        self.esp32cam_url_entry.grid(row=2, column=1, columnspan=2, padx=5, pady=3)
+
+        # 分辨率选择（USB）
+        ttk.Label(config_frame, text="分辨率:").grid(row=1, column=2, sticky=tk.W, padx=10, pady=3)
+        self.resolution_var = tk.StringVar()
+        default_res = f"{self.config['usb_resolution'][0]}x{self.config['usb_resolution'][1]} (高清)"
+        if default_res not in self.resolution_options:
+            default_res = self.resolution_options[0]
+        self.resolution_var.set(default_res)
+        resolution_combo = ttk.Combobox(config_frame, textvariable=self.resolution_var,
+                                       values=self.resolution_options, state="readonly", width=15)
+        resolution_combo.grid(row=1, column=3, padx=5, pady=3)
+
+        # 帧率配置
+        ttk.Label(config_frame, text="帧率(FPS):").grid(row=1, column=4, sticky=tk.W, padx=10, pady=3)
+        self.fps_var = tk.StringVar(value=str(self.config["usb_fps"]))
+        self.fps_entry = ttk.Entry(config_frame, textvariable=self.fps_var, width=8)
+        self.fps_entry.grid(row=1, column=5, padx=5, pady=3)
+
+        # ESP32CAM帧率
+        ttk.Label(config_frame, text="ESP32CAM帧率:").grid(row=2, column=4, sticky=tk.W, padx=10, pady=3)
+        self.esp32_fps_var = tk.StringVar(value=str(self.config["esp32cam_fps"]))
+        self.esp32_fps_entry = ttk.Entry(config_frame, textvariable=self.esp32_fps_var, width=8)
+        self.esp32_fps_entry.grid(row=2, column=5, padx=5, pady=3)
 
         # 串口配置
-        ttk.Label(config_frame, text="串口端口:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=3)
+        ttk.Label(config_frame, text="串口端口:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=3)
         self.serial_port_var = tk.StringVar(value=self.config["serial_port"])
-        ttk.Entry(config_frame, textvariable=self.serial_port_var, width=10).grid(row=0, column=3, padx=5, pady=3)
+        self.serial_port_entry = ttk.Entry(config_frame, textvariable=self.serial_port_var, width=10)
+        self.serial_port_entry.grid(row=3, column=1, padx=5, pady=3)
 
-        ttk.Label(config_frame, text="波特率:").grid(row=0, column=4, sticky=tk.W, padx=5, pady=3)
+        ttk.Label(config_frame, text="波特率:").grid(row=3, column=2, sticky=tk.W, padx=10, pady=3)
         self.baud_rate_var = tk.StringVar(value=str(self.config["baud_rate"]))
-        ttk.Entry(config_frame, textvariable=self.baud_rate_var, width=10).grid(row=0, column=5, padx=5, pady=3)
+        self.baud_rate_entry = ttk.Entry(config_frame, textvariable=self.baud_rate_var, width=10)
+        self.baud_rate_entry.grid(row=3, column=3, padx=5, pady=3)
 
-        # 白名单
-        ttk.Label(config_frame, text="白名单车牌(逗号分隔):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
+        # 白名单配置
+        ttk.Label(config_frame, text="白名单车牌:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=3)
         whitelist_text = ", ".join(self.config["plate_whitelist"])
         self.whitelist_var = tk.StringVar(value=whitelist_text)
-        ttk.Entry(config_frame, textvariable=self.whitelist_var, width=50).grid(row=1, column=1, columnspan=5, padx=5,
-                                                                                pady=3)
+        self.whitelist_entry = ttk.Entry(config_frame, textvariable=self.whitelist_var, width=50)
+        self.whitelist_entry.grid(row=4, column=1, columnspan=5, padx=5, pady=3)
 
         # 保存配置按钮
-        ttk.Button(config_frame, text="保存配置", command=self.save_config).grid(row=2, column=0, columnspan=6, pady=5)
+        ttk.Button(config_frame, text="保存配置", command=self.save_config).grid(row=5, column=0, columnspan=6, pady=5)
 
         # 2. 操作按钮区
         button_frame = ttk.Frame(parent)
         button_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
 
+        # 核心控制按钮
         self.start_btn = ttk.Button(button_frame, text="启动识别", command=self.start_recognition)
         self.start_btn.grid(row=0, column=0, padx=5)
 
@@ -138,29 +211,48 @@ class LicensePlateRecognitionGUI:
         )
         auto_switch.grid(row=0, column=2, padx=10)
 
-        ttk.Button(button_frame, text="清空缓存", command=self.clear_plate_cache).grid(row=0, column=3, padx=5)
-        ttk.Button(button_frame, text="清空日志", command=self.clear_log).grid(row=0, column=4, padx=5)
-        ttk.Button(button_frame, text="保存日志", command=self.save_log).grid(row=0, column=5, padx=5)
+        # 镜像模式开关
+        mirror_switch = ttk.Checkbutton(
+            button_frame,
+            text="画面镜像显示",
+            variable=self.mirror_mode,
+            command=self.on_mirror_mode_switch
+        )
+        mirror_switch.grid(row=0, column=3, padx=10)
+
+        # 画面增强开关
+        enhance_switch = ttk.Checkbutton(
+            button_frame,
+            text="画面增强(锐化+明艳)",
+            variable=self.enhance_mode,
+            command=self.on_enhance_mode_switch
+        )
+        enhance_switch.grid(row=0, column=4, padx=10)
+
+        # 辅助功能按钮
+        ttk.Button(button_frame, text="清空缓存", command=self.clear_plate_cache).grid(row=0, column=5, padx=5)
+        ttk.Button(button_frame, text="清空日志", command=self.clear_log).grid(row=0, column=6, padx=5)
+        ttk.Button(button_frame, text="保存日志", command=self.save_log).grid(row=0, column=7, padx=5)
 
         # 3. 实时监控区
         monitor_frame = ttk.LabelFrame(parent, text="实时监控", padding="10")
         monitor_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
 
-        # 视频显示
+        # 视频显示标签
         self.video_label = ttk.Label(monitor_frame)
-        self.video_label.grid(row=0, column=0)
+        self.video_label.grid(row=0, column=0, padx=5, pady=5)
 
-        # 状态显示
+        # 状态显示区
         status_frame = ttk.Frame(monitor_frame)
         status_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
 
-        ttk.Label(status_frame, text="当前状态：").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(status_frame, text="当前状态：").grid(row=0, column=0, sticky=tk.W, padx=5)
         self.status_var = tk.StringVar(value="未运行")
-        ttk.Label(status_frame, textvariable=self.status_var, foreground="red").grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(status_frame, textvariable=self.status_var, foreground="red").grid(row=0, column=1, sticky=tk.W, padx=5)
 
         ttk.Label(status_frame, text="最后识别车牌：").grid(row=0, column=2, sticky=tk.W, padx=10)
         self.last_plate_var = tk.StringVar(value="无")
-        ttk.Label(status_frame, textvariable=self.last_plate_var).grid(row=0, column=3, sticky=tk.W)
+        ttk.Label(status_frame, textvariable=self.last_plate_var).grid(row=0, column=3, sticky=tk.W, padx=5)
 
         # 4. 日志显示区
         log_frame = ttk.LabelFrame(parent, text="系统日志", padding="10")
@@ -186,26 +278,29 @@ class LicensePlateRecognitionGUI:
         # 基础时长
         ttk.Label(rule_frame, text="基础时长(分钟):").grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
         self.base_minutes_var = tk.StringVar(value=str(self.parking_config["base_minutes"]))
-        ttk.Entry(rule_frame, textvariable=self.base_minutes_var, width=10).grid(row=0, column=1, padx=5, pady=3)
+        self.base_minutes_entry = ttk.Entry(rule_frame, textvariable=self.base_minutes_var, width=10)
+        self.base_minutes_entry.grid(row=0, column=1, padx=5, pady=3)
 
         # 基础费用
-        ttk.Label(rule_frame, text="基础费用(元):").grid(row=0, column=2, sticky=tk.W, padx=5, pady=3)
+        ttk.Label(rule_frame, text="基础费用(元):").grid(row=0, column=2, sticky=tk.W, padx=10, pady=3)
         self.base_fee_var = tk.StringVar(value=str(self.parking_config["base_fee"]))
-        ttk.Entry(rule_frame, textvariable=self.base_fee_var, width=10).grid(row=0, column=3, padx=5, pady=3)
+        self.base_fee_entry = ttk.Entry(rule_frame, textvariable=self.base_fee_var, width=10)
+        self.base_fee_entry.grid(row=0, column=3, padx=5, pady=3)
 
         # 超时单价
         ttk.Label(rule_frame, text="超时单价(元/60分钟):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=3)
         self.unit_price_var = tk.StringVar(value=str(self.parking_config["unit_price"]))
-        ttk.Entry(rule_frame, textvariable=self.unit_price_var, width=10).grid(row=1, column=1, padx=5, pady=3)
+        self.unit_price_entry = ttk.Entry(rule_frame, textvariable=self.unit_price_var, width=10)
+        self.unit_price_entry.grid(row=1, column=1, padx=5, pady=3)
 
         # 单日最高费用
-        ttk.Label(rule_frame, text="单日最高费用(元):").grid(row=1, column=2, sticky=tk.W, padx=5, pady=3)
+        ttk.Label(rule_frame, text="单日最高费用(元):").grid(row=1, column=2, sticky=tk.W, padx=10, pady=3)
         self.max_fee_var = tk.StringVar(value=str(self.parking_config["max_fee_per_day"]))
-        ttk.Entry(rule_frame, textvariable=self.max_fee_var, width=10).grid(row=1, column=3, padx=5, pady=3)
+        self.max_fee_entry = ttk.Entry(rule_frame, textvariable=self.max_fee_var, width=10)
+        self.max_fee_entry.grid(row=1, column=3, padx=5, pady=3)
 
         # 保存规则按钮
-        ttk.Button(rule_frame, text="保存收费规则", command=self.save_parking_rules).grid(row=2, column=0, columnspan=4,
-                                                                                          pady=5)
+        ttk.Button(rule_frame, text="保存收费规则", command=self.save_parking_rules).grid(row=2, column=0, columnspan=4, pady=5)
 
         # 2. 入场出场操作区
         op_frame = ttk.LabelFrame(parent, text="手动入场出场操作", padding="10")
@@ -214,9 +309,9 @@ class LicensePlateRecognitionGUI:
         # 车牌输入
         ttk.Label(op_frame, text="车牌号码:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
         self.plate_input_var = tk.StringVar()
-        plate_entry = ttk.Entry(op_frame, textvariable=self.plate_input_var, width=20)
-        plate_entry.grid(row=0, column=1, padx=5, pady=3)
-        plate_entry.bind('<Return>', lambda e: self.register_entry())
+        self.plate_input_entry = ttk.Entry(op_frame, textvariable=self.plate_input_var, width=20)
+        self.plate_input_entry.grid(row=0, column=1, padx=5, pady=3)
+        self.plate_input_entry.bind('<Return>', lambda e: self.register_entry())
 
         # 操作按钮
         ttk.Button(op_frame, text="手动入场", command=self.register_entry).grid(row=0, column=2, padx=5, pady=3)
@@ -228,12 +323,13 @@ class LicensePlateRecognitionGUI:
         result_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
 
         self.fee_result_text = scrolledtext.ScrolledText(result_frame, width=80, height=5, wrap=tk.WORD)
-        self.fee_result_text.grid(row=0, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=3)
+        self.fee_result_text.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=3)
 
         # 4. 在场车辆列表
         parking_frame = ttk.LabelFrame(parent, text="在场车辆", padding="10")
         parking_frame.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
 
+        # 在场车辆表格
         self.parking_tree = ttk.Treeview(parking_frame, columns=("plate", "in_time"), show="headings", height=8)
         self.parking_tree.heading("plate", text="车牌号码")
         self.parking_tree.heading("in_time", text="入场时间")
@@ -250,6 +346,7 @@ class LicensePlateRecognitionGUI:
         record_frame = ttk.LabelFrame(parent, text="收费记录", padding="10")
         record_frame.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
 
+        # 收费记录表格
         self.payment_tree = ttk.Treeview(record_frame,
                                          columns=("plate", "in_time", "out_time", "duration", "fee", "pay_status"),
                                          show="headings", height=10)
@@ -260,7 +357,7 @@ class LicensePlateRecognitionGUI:
         self.payment_tree.heading("fee", text="费用(元)")
         self.payment_tree.heading("pay_status", text="支付状态")
 
-        # 列宽
+        # 列宽设置
         self.payment_tree.column("plate", width=100)
         self.payment_tree.column("in_time", width=180)
         self.payment_tree.column("out_time", width=180)
@@ -282,9 +379,125 @@ class LicensePlateRecognitionGUI:
         record_frame.columnconfigure(0, weight=1)
         record_frame.rowconfigure(0, weight=1)
 
-    # ========== 日志与状态管理 ==========
+    # ========== 画面增强核心函数 ==========
+    def enhance_frame(self, frame):
+        """
+        增强画面效果：锐度 + 饱和度（明艳） + 对比度 + 亮度
+        :param frame: 原始帧
+        :return: 增强后的帧
+        """
+        if not self.enhance_mode.get():
+            return frame
+
+        # 1. 对比度 + 亮度调整
+        alpha = self.contrast_factor.get()  # 对比度
+        beta = int((self.brightness_factor.get() - 1) * 50)  # 亮度偏移量
+        frame = cv2.convertScaleAbs(frame, alpha=alpha, beta=beta)
+
+        # 2. 饱和度（明艳度）调整
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        # 调整饱和度通道
+        s = cv2.multiply(s, self.saturation_factor.get())
+        s = np.clip(s, 0, 255).astype(hsv.dtype)  # 限制在0-255范围内
+        hsv_new = cv2.merge((h, s, v))
+        frame = cv2.cvtColor(hsv_new, cv2.COLOR_HSV2BGR)
+
+        # 3. 锐度调整
+        sharpen_amount = self.sharpen_amount.get()
+        if sharpen_amount > 0:
+            # 锐化核（数值越大锐化越强）
+            kernel = np.array([[0, -1, 0],
+                               [-1, 4 + sharpen_amount * 5, -1],
+                               [0, -1, 0]])
+            frame = cv2.filter2D(frame, -1, kernel)
+
+        return frame
+
+    # ========== 模式切换函数 ==========
+    def on_camera_type_change(self, event=None):
+        """摄像头类型切换"""
+        camera_type = self.camera_type_var.get()
+        if camera_type == "USB":
+            self.camera_index_entry.config(state="normal")
+            self.esp32cam_url_entry.config(state="disabled")
+            self.fps_entry.config(state="normal")
+            self.esp32_fps_entry.config(state="disabled")
+        elif camera_type == "ESP32CAM":
+            self.camera_index_entry.config(state="disabled")
+            self.esp32cam_url_entry.config(state="normal")
+            self.fps_entry.config(state="disabled")
+            self.esp32_fps_entry.config(state="normal")
+        self.log_message(f"切换摄像头类型为：{camera_type}")
+
+    def on_auto_mode_switch(self):
+        """自动模式切换"""
+        mode = "开启" if self.auto_in_out_enabled.get() else "关闭"
+        self.log_message(f"自动出入场模式{mode}")
+        if self.is_running:
+            self.update_status()
+
+    def on_mirror_mode_switch(self):
+        """镜像模式切换"""
+        mode = "开启" if self.mirror_mode.get() else "关闭"
+        self.log_message(f"画面镜像显示{mode}")
+        if self.is_running:
+            self.update_status()
+
+    def on_enhance_mode_switch(self):
+        """画面增强模式切换"""
+        mode = "开启" if self.enhance_mode.get() else "关闭"
+        self.log_message(f"画面锐化+明艳增强{mode}")
+        if self.is_running:
+            self.update_status()
+
+    # ========== 配置保存函数 ==========
+    def save_config(self):
+        """保存基础配置"""
+        try:
+            self.config["camera_type"] = self.camera_type_var.get()
+            self.config["camera_index"] = int(self.camera_index_var.get())
+            self.config["esp32cam_url"] = self.esp32cam_url_var.get()
+            self.config["serial_port"] = self.serial_port_var.get()
+            self.config["baud_rate"] = int(self.baud_rate_var.get())
+            
+            # 分辨率和帧率
+            if self.config["camera_type"] == "USB":
+                self.config["usb_resolution"] = self.resolution_mapping[self.resolution_var.get()]
+                self.config["usb_fps"] = int(self.fps_var.get())
+            else:
+                self.config["esp32cam_fps"] = int(self.esp32_fps_var.get())
+            
+            # 白名单更新
+            whitelist_str = self.whitelist_var.get().strip()
+            if whitelist_str:
+                self.config["plate_whitelist"] = set([plate.strip().upper() for plate in whitelist_str.split(",")])
+            else:
+                self.config["plate_whitelist"] = set()
+
+            self.log_message("配置保存成功")
+            messagebox.showinfo("成功", "配置保存成功！")
+        except Exception as e:
+            self.log_message(f"配置保存失败：{str(e)}")
+            messagebox.showerror("错误", f"配置保存失败：{str(e)}")
+
+    def save_parking_rules(self):
+        """保存收费规则"""
+        try:
+            self.parking_config["base_minutes"] = int(self.base_minutes_var.get())
+            self.parking_config["base_fee"] = float(self.base_fee_var.get())
+            self.parking_config["unit_price"] = float(self.unit_price_var.get())
+            self.parking_config["max_fee_per_day"] = float(self.max_fee_var.get())
+
+            self.log_message("收费规则保存成功")
+            messagebox.showinfo("成功", "收费规则保存成功！")
+        except Exception as e:
+            self.log_message(f"收费规则保存失败：{str(e)}")
+            messagebox.showerror("错误", f"收费规则保存失败：{str(e)}")
+
+    # ========== 日志与状态函数 ==========
     def log_message(self, msg):
-        """添加日志"""
+        """添加日志信息"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_msg = f"[{timestamp}] {msg}\n"
         self.log_text.insert(tk.END, log_msg)
@@ -311,50 +524,17 @@ class LicensePlateRecognitionGUI:
                 messagebox.showinfo("成功", "日志保存成功！")
             except Exception as e:
                 self.log_message(f"日志保存失败：{str(e)}")
-                messagebox.showerror("错误", f"保存日志失败：{str(e)}")
+                messagebox.showerror("错误", f"日志保存失败：{str(e)}")
 
-    # ========== 配置管理 ==========
-    def save_config(self):
-        """保存基础配置"""
-        try:
-            self.config["camera_index"] = int(self.camera_index_var.get())
-            self.config["serial_port"] = self.serial_port_var.get()
-            self.config["baud_rate"] = int(self.baud_rate_var.get())
-
-            # 更新白名单
-            whitelist_str = self.whitelist_var.get().strip()
-            if whitelist_str:
-                self.config["plate_whitelist"] = set([plate.strip().upper() for plate in whitelist_str.split(",")])
-            else:
-                self.config["plate_whitelist"] = set()
-
-            self.log_message("配置保存成功")
-            messagebox.showinfo("成功", "配置已保存！")
-        except Exception as e:
-            self.log_message(f"配置保存失败：{str(e)}")
-            messagebox.showerror("错误", f"保存配置失败：{str(e)}")
-
-    def save_parking_rules(self):
-        """保存收费规则"""
-        try:
-            self.parking_config["base_minutes"] = int(self.base_minutes_var.get())
-            self.parking_config["base_fee"] = float(self.base_fee_var.get())
-            self.parking_config["unit_price"] = float(self.unit_price_var.get())
-            self.parking_config["max_fee_per_day"] = float(self.max_fee_var.get())
-
-            self.log_message("收费规则保存成功")
-            messagebox.showinfo("成功", "收费规则已保存！")
-        except Exception as e:
-            self.log_message(f"保存收费规则失败：{str(e)}")
-            messagebox.showerror("错误", f"保存失败：{str(e)}")
-
-    # ========== 自动模式 ==========
-    def on_auto_mode_switch(self):
-        """自动模式切换"""
-        mode = "开启" if self.auto_in_out_enabled.get() else "关闭"
-        self.log_message(f"自动出入场模式{mode}")
-        if self.is_running:
-            self.status_var.set(f"运行中 - 自动模式{mode}")
+    def update_status(self):
+        """更新状态栏信息"""
+        if not self.is_running:
+            return
+        camera_type = self.config["camera_type"]
+        auto_mode = "开启" if self.auto_in_out_enabled.get() else "关闭"
+        mirror_mode = "开启" if self.mirror_mode.get() else "关闭"
+        enhance_mode = "开启" if self.enhance_mode.get() else "关闭"
+        self.status_var.set(f"运行中 - {camera_type}摄像头 - 自动模式{auto_mode} - 镜像{mirror_mode} - 画面增强{enhance_mode}")
 
     # ========== 车牌缓存管理 ==========
     def clear_plate_cache(self):
@@ -387,21 +567,21 @@ class LicensePlateRecognitionGUI:
             "in_datetime": current_datetime
         }
 
-        # 更新界面
+        # 更新在场车辆列表
         self.update_parking_tree()
 
-        # 日志
+        # 日志记录
         self.log_message(f"【手动入场】{plate_num}，时间：{current_datetime}")
         self.fee_result_text.insert(tk.END, f"【手动入场】{plate_num} - 入场时间：{current_datetime}\n")
         self.fee_result_text.see(tk.END)
 
-        # 清空输入
+        # 清空输入框
         self.plate_input_var.set("")
         messagebox.showinfo("成功", f"车牌{plate_num}入场登记成功！")
 
     def auto_entry_exit(self, plate_num):
-        """自动出入场"""
-        # 防抖
+        """自动入场/出场"""
+        # 防抖判断
         current_time = time.time()
         if plate_num == self.last_recognized_plate and current_time - self.last_recognize_time < RECOGNIZE_DEBOUNCE:
             return
@@ -410,6 +590,7 @@ class LicensePlateRecognitionGUI:
         self.last_recognize_time = current_time
         self.last_plate_var.set(plate_num)
 
+        # 车牌格式校验
         if not plate_num or not PLATE_PATTERN.match(plate_num):
             return
 
@@ -421,7 +602,10 @@ class LicensePlateRecognitionGUI:
                 "in_datetime": current_datetime
             }
 
+            # 更新在场车辆列表
             self.update_parking_tree()
+
+            # 日志记录
             self.log_message(f"【自动入场】{plate_num}，时间：{current_datetime}")
             self.fee_result_text.insert(tk.END, f"【自动入场】{plate_num} - 入场时间：{current_datetime}\n")
             self.fee_result_text.see(tk.END)
@@ -437,18 +621,18 @@ class LicensePlateRecognitionGUI:
                 self.log_message(f"【自动出场失败】{plate_num} - {error}")
                 return
 
-            # 自动缴费
+            # 标记为已支付
             fee_result["pay_status"] = "已支付"
             self.payment_records.append(fee_result)
 
             # 移除在场记录
             del self.parking_records[plate_num]
 
-            # 更新界面
+            # 更新列表
             self.update_parking_tree()
             self.update_payment_tree()
 
-            # 日志
+            # 日志记录
             log_msg = f"【自动出场】{plate_num} | 时长:{fee_result['duration']}分钟 | 费用:{fee_result['fee']}元"
             self.log_message(log_msg)
             self.fee_result_text.insert(tk.END, f"{log_msg}\n")
@@ -458,18 +642,52 @@ class LicensePlateRecognitionGUI:
             _, msg = self.recognition_core.send_serial_data(plate_num, True, self.auto_in_out_enabled.get())
             self.log_message(msg)
 
+    def calculate_fee(self):
+        """手动计费"""
+        plate_num = self.plate_input_var.get().strip().upper()
+
+        if not plate_num:
+            messagebox.showwarning("警告", "请输入车牌号码！")
+            return
+
+        fee_result, error = self.calculate_parking_fee(plate_num)
+        if error:
+            self.log_message(f"【手动计费失败】{plate_num} - {error}")
+            self.fee_result_text.insert(tk.END, f"【手动计费失败】{plate_num} - {error}\n")
+            self.fee_result_text.see(tk.END)
+            messagebox.showwarning("警告", error)
+            return
+
+        # 显示计费结果
+        result_text = (
+            f"【手动计费】{fee_result['plate']}\n"
+            f"  入场时间：{fee_result['in_time']}\n"
+            f"  出场时间：{fee_result['out_time']}\n"
+            f"  停车时长：{fee_result['duration']} 分钟\n"
+            f"  应付费用：{fee_result['fee']} 元\n"
+            f"  支付状态：{fee_result['pay_status']}\n"
+        )
+        self.fee_result_text.insert(tk.END, result_text + "\n")
+        self.fee_result_text.see(tk.END)
+
+        # 暂存计费结果
+        self.current_fee_result = fee_result
+
+        self.log_message(f"【手动计费】{plate_num}，时长{fee_result['duration']}分钟，费用{fee_result['fee']}元")
+        messagebox.showinfo("计费结果", result_text)
+
     def calculate_parking_fee(self, plate_num):
         """计算停车费用"""
         if plate_num not in self.parking_records:
-            return None, "车牌未在场，无法计费！"
+            return None, "该车牌未入场，无法计费！"
 
-        # 入场时间
+        # 获取入场时间
         in_time = self.parking_records[plate_num]["in_time"]
         in_datetime = self.parking_records[plate_num]["in_datetime"]
-
-        # 计算时长
         out_time = time.time()
         out_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 计算停车时长（分钟）
         duration_seconds = out_time - in_time
         duration_minutes = round(duration_seconds / 60)
 
@@ -483,87 +701,55 @@ class LicensePlateRecognitionGUI:
         if duration_minutes <= base_minutes:
             fee = base_fee
         else:
+            # 超出基础时长的部分
             overtime_minutes = duration_minutes - base_minutes
+            # 按60分钟为单位向上取整
             overtime_units = (overtime_minutes + unit_minutes - 1) // unit_minutes
             fee = base_fee + (overtime_units * unit_price)
 
-        # 最高费用限制
+        # 限制最高费用
         fee = min(fee, max_fee)
         fee = round(fee, 2)
 
-        result = {
+        return {
             "plate": plate_num,
             "in_time": in_datetime,
             "out_time": out_datetime,
             "duration": duration_minutes,
             "fee": fee,
             "pay_status": "未支付"
-        }
-
-        return result, None
-
-    def calculate_fee(self):
-        """手动计费"""
-        plate_num = self.plate_input_var.get().strip().upper()
-
-        if not plate_num:
-            messagebox.showwarning("警告", "请输入车牌号码！")
-            return
-
-        fee_result, error = self.calculate_parking_fee(plate_num)
-
-        if error:
-            self.fee_result_text.insert(tk.END, f"【手动计费失败】{plate_num} - {error}\n")
-            self.fee_result_text.see(tk.END)
-            messagebox.showwarning("警告", error)
-            return
-
-        # 显示结果
-        result_text = (
-            f"【手动计费】{fee_result['plate']}\n"
-            f"  入场时间：{fee_result['in_time']}\n"
-            f"  出场时间：{fee_result['out_time']}\n"
-            f"  停车时长：{fee_result['duration']} 分钟\n"
-            f"  应付费用：{fee_result['fee']} 元\n"
-            f"  支付状态：{fee_result['pay_status']}\n"
-        )
-        self.fee_result_text.insert(tk.END, result_text + "\n")
-        self.fee_result_text.see(tk.END)
-
-        # 暂存结果
-        self.current_fee_result = fee_result
-
-        self.log_message(f"【手动计费】{plate_num}，时长{fee_result['duration']}分钟，费用{fee_result['fee']}元")
-        messagebox.showinfo("计费结果", result_text)
+        }, None
 
     def confirm_payment(self):
         """确认缴费"""
         if not hasattr(self, 'current_fee_result') or not self.current_fee_result:
-            messagebox.showwarning("警告", "请先计算停车费用！")
+            messagebox.showwarning("警告", "请先进行计费操作！")
             return
 
         plate_num = self.current_fee_result["plate"]
         self.current_fee_result["pay_status"] = "已支付"
+
+        # 添加到收费记录
         self.payment_records.append(self.current_fee_result)
 
         # 移除在场记录
         if plate_num in self.parking_records:
             del self.parking_records[plate_num]
 
-        # 更新界面
+        # 更新列表
         self.update_parking_tree()
         self.update_payment_tree()
 
-        # 日志
-        self.log_message(f"【手动缴费】{plate_num}，费用{self.current_fee_result['fee']}元")
-        self.fee_result_text.insert(tk.END, f"【手动缴费完成】{plate_num} - 费用{self.current_fee_result['fee']}元\n")
+        # 日志记录
+        self.log_message(f"【确认缴费】{plate_num}，费用{self.current_fee_result['fee']}元")
+        self.fee_result_text.insert(tk.END, f"【确认缴费】{plate_num} - 费用{self.current_fee_result['fee']}元（已支付）\n")
         self.fee_result_text.see(tk.END)
 
         # 发送放行指令
         _, msg = self.recognition_core.send_serial_data(plate_num, True, self.auto_in_out_enabled.get())
         self.log_message(msg)
 
-        # 清空
+        # 清空计费结果和输入框
         delattr(self, 'current_fee_result')
         self.plate_input_var.set("")
 
@@ -571,17 +757,21 @@ class LicensePlateRecognitionGUI:
 
     def update_parking_tree(self):
         """更新在场车辆列表"""
+        # 清空现有内容
         for item in self.parking_tree.get_children():
             self.parking_tree.delete(item)
 
+        # 添加新内容
         for plate, record in self.parking_records.items():
             self.parking_tree.insert("", tk.END, values=(plate, record["in_datetime"]))
 
     def update_payment_tree(self):
         """更新收费记录列表"""
+        # 清空现有内容
         for item in self.payment_tree.get_children():
             self.payment_tree.delete(item)
 
+        # 添加新内容
         for record in self.payment_records:
             self.payment_tree.insert("", tk.END, values=(
                 record["plate"],
@@ -593,34 +783,38 @@ class LicensePlateRecognitionGUI:
             ))
 
     def on_parking_tree_select(self):
-        """在场车辆右键选择"""
-        selected = self.parking_tree.selection()
-        if not selected:
+        """右键选择在场车辆进行计费"""
+        selected_items = self.parking_tree.selection()
+        if not selected_items:
             return
 
-        item = self.parking_tree.item(selected[0])
-        plate_num = item["values"][0]
+        # 获取选中的车牌
+        item = selected_items[0]
+        plate_num = self.parking_tree.item(item, "values")[0]
         self.plate_input_var.set(plate_num)
         self.calculate_fee()
 
     def export_payment_records(self):
-        """导出收费记录"""
+        """导出收费记录到CSV文件"""
         if not self.payment_records:
             messagebox.showwarning("警告", "暂无收费记录可导出！")
             return
 
+        # 选择保存路径
         file_path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV文件", "*.csv"), ("所有文件", "*.*")],
             title="导出收费记录"
         )
-
         if not file_path:
             return
 
         try:
+            # 写入CSV文件
             with open(file_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=["plate", "in_time", "out_time", "duration", "fee", "pay_status"])
+                fieldnames = ["plate", "in_time", "out_time", "duration", "fee", "pay_status"]
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                
                 writer.writeheader()
                 writer.writerows(self.payment_records)
 
@@ -630,9 +824,9 @@ class LicensePlateRecognitionGUI:
             self.log_message(f"导出收费记录失败：{str(e)}")
             messagebox.showerror("错误", f"导出失败：{str(e)}")
 
-    # ========== 摄像头与识别控制 ==========
+    # ========== 摄像头控制 ==========
     def start_recognition(self):
-        """启动识别"""
+        """启动摄像头和识别"""
         if self.is_running:
             return
 
@@ -648,140 +842,218 @@ class LicensePlateRecognitionGUI:
         self.log_message(msg)
 
         # 初始化摄像头
-        self.cap = cv2.VideoCapture(self.config["camera_index"])
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        camera_type = self.config["camera_type"]
+        self.cap = None
+        max_retries = 5
+        retry_count = 0
 
-        if not self.cap.isOpened():
-            self.log_message(f"无法打开摄像头：索引 {self.config['camera_index']}")
-            messagebox.showerror("错误", f"无法打开摄像头！\n请检查摄像头索引或连接状态")
+        while retry_count < max_retries and self.cap is None:
+            try:
+                if camera_type == "USB":
+                    # 打开USB摄像头
+                    self.cap = cv2.VideoCapture(self.config["camera_index"])
+                    # 设置分辨率和帧率
+                    width, height = self.config["usb_resolution"]
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    self.cap.set(cv2.CAP_PROP_FPS, self.config["usb_fps"])
+
+                    # 获取实际参数
+                    actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                    actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                    actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+
+                    self.log_message(f"USB摄像头配置：{width}x{height} @ {self.config['usb_fps']}FPS")
+                    self.log_message(f"实际参数：{actual_width}x{actual_height} @ {actual_fps}FPS")
+
+                elif camera_type == "ESP32CAM":
+                    # 打开网络摄像头
+                    self.cap = cv2.VideoCapture(self.config["esp32cam_url"])
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.config["esp32cam_buffer"])
+                    self.cap.set(cv2.CAP_PROP_FPS, self.config["esp32cam_fps"])
+
+                    self.log_message(f"ESP32CAM配置：{self.config['esp32cam_fps']}FPS，缓冲区：{self.config['esp32cam_buffer']}")
+
+                # 检查摄像头是否打开
+                if not self.cap or not self.cap.isOpened():
+                    self.cap = None
+                    retry_count += 1
+                    self.log_message(f"摄像头连接失败，重试 {retry_count}/{max_retries}...")
+                    time.sleep(1)
+                else:
+                    self.log_message(f"{camera_type}摄像头连接成功")
+
+            except Exception as e:
+                self.log_message(f"摄像头初始化错误: {str(e)}")
+                retry_count += 1
+                time.sleep(1)
+
+        # 摄像头打开失败
+        if self.cap is None or not self.cap.isOpened():
+            error_msg = f"无法打开{camera_type}摄像头！"
+            self.log_message(error_msg)
+            messagebox.showerror("错误", f"{error_msg}\n请检查：\n1. 摄像头是否连接正常\n2. 网络是否通畅（ESP32CAM）\n3. 配置参数是否正确")
             # 关闭串口
             self.recognition_core.close_serial()
             return
 
-        # 更新状态
+        # 标记为运行状态
         self.is_running = True
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
 
-        auto_mode = "开启" if self.auto_in_out_enabled.get() else "关闭"
-        self.status_var.set(f"运行中 - 自动模式{auto_mode}")
-
-        self.log_message("启动车牌识别系统")
+        # 更新状态栏
+        self.update_status()
 
         # 启动摄像头线程
         self.camera_thread = threading.Thread(target=self.camera_worker, daemon=True)
         self.camera_thread.start()
 
+        self.log_message(f"车牌识别系统已启动（{camera_type}摄像头）")
+
     def stop_recognition(self):
-        """停止识别"""
+        """停止摄像头和识别"""
+        if not self.is_running:
+            return
+
+        # 标记为停止状态
         self.is_running = False
 
-        # 等待线程
+        # 等待线程结束
         if self.camera_thread:
             self.camera_thread.join(timeout=2)
 
-        # 释放资源
+        # 释放摄像头
         if self.cap:
             self.cap.release()
+            self.cap = None
+
+        # 关闭串口
         msg = self.recognition_core.close_serial()
         self.log_message(msg)
 
-        # 清空视频
+        # 清空视频显示
         self.video_label.config(image='')
 
-        # 更新状态
+        # 更新按钮状态
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
+
+        # 更新状态栏
         self.status_var.set("未运行")
         self.last_plate_var.set("无")
 
-        self.log_message("停止车牌识别系统")
+        self.log_message("车牌识别系统已停止")
 
     def camera_worker(self):
-        """摄像头处理线程"""
+        """摄像头工作线程"""
         detect_counter = 0
         frame_counter = 0
         cached_plate_num = ""
+        frame_skip = 2  # 跳帧处理，减轻CPU负担
+        frame_count = 0
 
         while self.is_running:
-            # 自动清理缓存
-            self.recognition_core.clear_sent_plates_cache_auto()
+            try:
+                # 自动清理缓存
+                self.recognition_core.clear_sent_plates_cache_auto()
 
-            ret, frame = self.cap.read()
-            if not ret:
-                self.log_message("无法读取摄像头画面")
-                break
+                # 读取帧
+                ret, frame = self.cap.read()
+                frame_count += 1
 
-            frame = (imutils.resize(frame, width=FRAME_WIDTH))
-            output_frame = frame.copy()
-            frame_counter += 1
+                # 跳帧处理
+                if frame_count % frame_skip != 0:
+                    continue
 
-            # 检测识别
-            detect_result = self.recognition_core.detect_and_recognize(frame, frame_counter)
-            is_plate_detected = detect_result["plate_detected"]
-            plate_loc = detect_result["plate_loc"]
-            current_plate = detect_result["plate_num"]
+                # 帧读取失败
+                if not ret or frame is None:
+                    self.log_message("视频流读取失败，尝试重新连接...")
+                    time.sleep(0.5)
+                    continue
 
-            # 防抖
-            detect_counter = detect_counter + 1 if is_plate_detected else 0
-            is_plate_detected = detect_counter >= DETECT_COUNTER_THRESH
+                # 调整帧大小
+                frame = imutils.resize(frame, width=FRAME_WIDTH)
 
-            # 处理识别结果
-            if is_plate_detected and plate_loc is not None and current_plate:
-                cached_plate_num = current_plate
+                # ========== 画面增强处理 ==========
+                frame = self.enhance_frame(frame)
 
-                # 自动模式
-                if self.auto_in_out_enabled.get():
-                    self.auto_entry_exit(current_plate)
-                else:
-                    # 手动模式
-                    is_authorized = self.recognition_core.is_plate_authorized(current_plate,
-                                                                              self.config["plate_whitelist"])
-                    _, msg = self.recognition_core.send_serial_data(current_plate, is_authorized)
-                    self.log_message(msg)
+                # 复制帧用于绘制
+                output_frame = frame.copy()
 
-                    if is_authorized:
-                        self.log_message(f"合法车牌：{current_plate} - 允许通行")
+                # 车牌检测与识别
+                frame_counter += 1
+                detect_result = self.recognition_core.detect_and_recognize(frame, frame_counter)
+                is_plate_detected = detect_result["plate_detected"]
+                plate_loc = detect_result["plate_loc"]
+                current_plate = detect_result["plate_num"]
+
+                # 防抖处理
+                detect_counter = detect_counter + 1 if is_plate_detected else 0
+                is_plate_detected = detect_counter >= DETECT_COUNTER_THRESH
+
+                # 处理识别结果
+                if is_plate_detected and plate_loc is not None and current_plate:
+                    cached_plate_num = current_plate
+
+                    # 自动模式处理入场/出场
+                    if self.auto_in_out_enabled.get():
+                        self.auto_entry_exit(current_plate)
+
+                    # 手动模式仅记录
                     else:
-                        self.log_message(f"非法车牌：{current_plate} - 禁止通行")
+                        is_authorized = self.recognition_core.is_plate_authorized(current_plate, self.config["plate_whitelist"])
+                        self.log_message(f"识别到车牌：{current_plate}（{'白名单' if is_authorized else '非白名单'}）")
+                        self.last_plate_var.set(current_plate)
 
-                # 更新最后识别车牌
-                self.last_plate_var.set(current_plate)
-            else:
-                cached_plate_num = ""
-
-            # 绘制结果
-            if is_plate_detected and plate_loc is not None:
-                x, y, w, h = plate_loc
-                if cached_plate_num and (self.recognition_core.is_plate_authorized(cached_plate_num, self.config[
-                    "plate_whitelist"]) or self.auto_in_out_enabled.get()):
-                    color = (0, 255, 0)  # 绿色
-                    text = f"Plate: {cached_plate_num} (ALLOWED)"
+                        # 绘制识别框
+                        x, y, w, h = plate_loc
+                        color = (0, 255, 0) if is_authorized else (0, 0, 255)
+                        cv2.rectangle(output_frame, (x, y), (x + w, y + h), color, 2)
+                        cv2.putText(output_frame, f"Plate: {current_plate}", (x, y - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
                 else:
-                    color = (0, 0, 255)  # 红色
-                    text = f"Plate: {cached_plate_num} (DENIED)" if cached_plate_num else "Detecting Plate..."
+                    cached_plate_num = ""
+                    cv2.putText(output_frame, "No Plate Detected", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    
+                if is_plate_detected and plate_loc is not None:
+                    x, y, w, h = plate_loc
+                    if cached_plate_num and (self.recognition_core.is_plate_authorized(cached_plate_num, self.config[
+                        "plate_whitelist"]) or self.auto_in_out_enabled.get()):
+                        color = (0, 255, 0)  # 绿色
+                        text = f"Plate: {cached_plate_num} (ALLOWED)"
+                    else:
+                        color = (0, 0, 255)  # 红色
+                        text = f"Plate: {cached_plate_num} (DENIED)" if cached_plate_num else "Detecting Plate..."
 
-                cv2.rectangle(output_frame, (x, y), (x + w, y + h), color, 2)
-                cv2.putText(output_frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-            else:
-                cached_plate_num = ""
-                cv2.putText(output_frame, "No Plate Detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    cv2.rectangle(output_frame, (x, y), (x + w, y + h), color, 2)
+                    cv2.putText(output_frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                else:
+                    cached_plate_num = ""
+                    cv2.putText(output_frame, "No Plate Detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)   
 
-            # 转换为TK显示格式
-            rgb_frame = cv2.cvtColor(output_frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(rgb_frame)
-            imgtk = ImageTk.PhotoImage(image=img)
+                # ========== 镜像处理 ==========
+                with self.mirror_lock:
+                    if self.mirror_mode.get():
+                        output_frame = cv2.flip(output_frame, 1)  # 水平翻转
 
-            # 更新界面
-            self.video_label.imgtk = imgtk
-            self.video_label.config(image=imgtk)
+                # 转换为TKinter显示格式
+                rgb_frame = cv2.cvtColor(output_frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(rgb_frame)
+                imgtk = ImageTk.PhotoImage(image=img)
 
-            # 控制帧率
-            time.sleep(0.02)
+                # 更新视频显示
+                self.video_label.imgtk = imgtk
+                self.video_label.config(image=imgtk)
+
+            except Exception as e:
+                self.log_message(f"摄像头线程错误: {str(e)}")
+                time.sleep(0.5)
+                continue
 
     def on_closing(self):
-        """窗口关闭"""
+        """窗口关闭回调"""
         if self.is_running:
             self.stop_recognition()
         self.root.destroy()
