@@ -4,25 +4,25 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9556d315-5b0c-408d-8098-36e9176dc919" name="更改" comment="在修改后增加了PC端的UI，同时拆分了代码增强了可读性">
-      <change beforePath="$PROJECT_DIR$/.idea/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.name" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/copilot.data.migration.agent.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/二阶段.iml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/plate_recognition_core.py" beforeDir="false" afterPath="$PROJECT_DIR$/plate_recognition_core.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui_components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_components.py" afterDir="false" />
+    <list default="true" id="9556d315-5b0c-408d-8098-36e9176dc919" name="更改" comment="增加RSCG12864的arduino代码和最终的硬件代码">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ChangesViewManager">
+    <option name="groupingKeys">
+      <option value="directory" />
+    </option>
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -38,8 +38,10 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;Python.HSVtest.executor&quot;: &quot;Run&quot;,
     &quot;Python.config.executor&quot;: &quot;Run&quot;,
     &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.plate_recognition_core.executor&quot;: &quot;Run&quot;,
     &quot;Python.ui_components.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
@@ -71,11 +73,57 @@
       <option name="project" value="LOCAL" />
       <updated>1772869028979</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="增加了镜像模式，支持使用esp32cam摄像头">
+      <option name="closed" value="true" />
+      <created>1772981725670</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1772981725670</updated>
+    </task>
+    <task id="LOCAL-00003" summary="增加了镜像模式，支持使用esp32cam摄像头">
+      <option name="closed" value="true" />
+      <created>1772981763216</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1772981763216</updated>
+    </task>
+    <task id="LOCAL-00004" summary="最终的版本">
+      <option name="closed" value="true" />
+      <created>1774191645921</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1774191645921</updated>
+    </task>
+    <task id="LOCAL-00005" summary="增加RSCG12864的arduino代码和最终的硬件代码">
+      <option name="closed" value="true" />
+      <created>1774192155141</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1774192155141</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="在修改后增加了PC端的UI，同时拆分了代码增强了可读性" />
-    <option name="LAST_COMMIT_MESSAGE" value="在修改后增加了PC端的UI，同时拆分了代码增强了可读性" />
+    <MESSAGE value="增加了镜像模式，支持使用esp32cam摄像头" />
+    <MESSAGE value="最终的版本" />
+    <MESSAGE value="增加RSCG12864的arduino代码和最终的硬件代码" />
+    <option name="LAST_COMMIT_MESSAGE" value="增加RSCG12864的arduino代码和最终的硬件代码" />
   </component>
 </project>
