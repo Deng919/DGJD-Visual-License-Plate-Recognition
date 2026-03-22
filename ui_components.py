@@ -25,7 +25,7 @@ class QuietStream:
 class LicensePlateRecognitionGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("车牌识别计时收费控制系统（带画面增强）")
+        self.root.title("车牌识别计时收费控制系统")
         self.root.geometry("1400x900")
         self.root.resizable(True, True)
 
@@ -38,7 +38,7 @@ class LicensePlateRecognitionGUI:
         self.cap = None
 
         # 镜像模式变量
-        self.mirror_mode = tk.BooleanVar(value=True)  # 镜像变量
+        self.mirror_mode = tk.BooleanVar(value=False)  # 镜像变量
         self.mirror_lock = threading.Lock()  # 镜像线程安全锁
 
         # 画面增强变量（从配置文件读取默认值）
@@ -996,15 +996,17 @@ class LicensePlateRecognitionGUI:
                 if is_plate_detected and plate_loc is not None and current_plate:
                     cached_plate_num = current_plate
 
-                    # 自动模式处理入场/出场
                     if self.auto_in_out_enabled.get():
+                        # 【模式1】开启自动出入场：处理入场/出场计费
                         self.auto_entry_exit(current_plate)
-
-                    # 手动模式仅记录
                     else:
-                        is_authorized = self.recognition_core.is_plate_authorized(current_plate, self.config["plate_whitelist"])
-                        self.log_message(f"识别到车牌：{current_plate}（{'白名单' if is_authorized else '非白名单'}）")
-                        self.last_plate_var.set(current_plate)
+                        # 【模式2】关闭自动出入场：仅判断白名单，发ALLOW/DENY
+                        is_authorized = self.recognition_core.is_plate_authorized(current_plate,self.config["plate_whitelist"])
+                        self.log_message(f"识别到车牌：{current_plate}（{'白名单-允许' if is_authorized else '非白名单-禁止'}）")
+
+                        # 发送指令给Arduino
+                        _, msg = self.recognition_core.send_serial_data(current_plate, is_authorized,self.auto_in_out_enabled.get())
+                        self.log_message(msg)
 
                         # 绘制识别框
                         x, y, w, h = plate_loc

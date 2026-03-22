@@ -3,7 +3,7 @@ import sys
 import tkinter as tk
 from ui_components import LicensePlateRecognitionGUI
 
-# 恢复标准输出（便于调试）
+# 恢复标准输出
 sys_stdout = sys.stdout
 sys_stderr = sys.stderr
 
